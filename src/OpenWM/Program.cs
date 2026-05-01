@@ -1,40 +1,65 @@
-﻿using OpenWM;
-using OpenWM.Config;
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using OpenWM.App;
+using OpenWM.Configuration;
+using OpenWM.Core;
+using OpenWM.DesktopManager;
+using OpenWM.Hotkeys;
+using OpenWM.Layout;
+using OpenWM.Platform;
+//using OpenWM.Workspaces;
 
-// OpenWM — A Hyprland-inspired tiling window manager for Windows
-// Usage: run OpenWM.exe (preferably at startup)
-
-// Handle Ctrl+C gracefully
-Console.CancelKeyPress += (_, e) =>
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 {
-    e.Cancel = true;
-    OpenWM.Native.NativeMethods.PostQuitMessage(0);
-};
+	Args = args,
+	ContentRootPath = AppContext.BaseDirectory
+});
 
-var config = Configuration.Load();
+builder.Configuration
+	.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+	.AddEnvironmentVariables(prefix: "OPENWM_");
 
-Console.WriteLine("╔══════════════════════════════════════════════════════╗");
-Console.WriteLine("║           OpenWM — Hyprland-like Window Manager      ║");
-Console.WriteLine("║                   for Windows (C#)                   ║");
-Console.WriteLine("╠══════════════════════════════════════════════════════╣");
-Console.WriteLine($"║  Layout     : {config.DefaultLayout,-38}║");
-Console.WriteLine($"║  Gaps       : {config.Gaps,-38}║");
-Console.WriteLine($"║  Workspaces : {config.WorkspaceCount,-38}║");
-Console.WriteLine("╠══════════════════════════════════════════════════════╣");
-Console.WriteLine("║  Hotkeys  (Win+Ctrl+...)                             ║");
-Console.WriteLine("║   Q      Quit                                        ║");
-Console.WriteLine("║   F      Toggle floating for focused window          ║");
-Console.WriteLine("║   Space  Toggle fullscreen for focused window        ║");
-Console.WriteLine("║   T      Retile active workspace                     ║");
-Console.WriteLine("║   L      Cycle layout (dwindle→master→floating)     ║");
-Console.WriteLine("║   W      Close focused window                        ║");
-Console.WriteLine("║   M      Promote focused window to master            ║");
-Console.WriteLine("║   ←/→    Focus previous/next window                 ║");
-Console.WriteLine("║   1-9    Switch to workspace 1-9                     ║");
-Console.WriteLine("║   ⇧+1-9  Move focused window to workspace 1-9       ║");
-Console.WriteLine("╚══════════════════════════════════════════════════════╝");
-Console.WriteLine();
+builder.Logging.AddSimpleConsole(options =>
+{
+	options.TimestampFormat = "HH:mm:ss ";
+	options.SingleLine = true;
+});
 
-using var app = new App(config);
-app.Run();
+builder.Services.AddSingleton<ILayoutStrategy, DwindleLayoutStrategy>();
+builder.Services.AddSingleton<ILayoutStrategy, MasterLayoutStrategy>();
+builder.Services.AddSingleton<ILayoutStrategy, DynamicLayoutStrategy>();
+builder.Services.AddSingleton<ILayoutStrategy, FloatingLayoutStrategy>();
+builder.Services.AddSingleton<LayoutEngine>();
 
+builder.Services
+	.AddOptions<OpenWMOptions>()
+	.Bind(builder.Configuration.GetSection("OpenWM"))
+	.ValidateOnStart();
+
+builder.Services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<OpenWMOptions>, OpenWMOptionsValidator>();
+
+builder.Services.AddSingleton<IWorkspaceManager>(sp =>
+{
+	var opt = sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<OpenWMOptions>>().CurrentValue;
+	return new WorkspaceManager(opt.WorkspaceCount, opt.DefaultLayout);
+});
+
+if (OperatingSystem.IsWindows())
+{
+	builder.Services.AddSingleton<IWindowSystem, WindowsWindowSystem>();
+	builder.Services.AddSingleton<IHotkeyService, WindowsHotkeyService>();
+}
+else
+{
+	builder.Services.AddSingleton<IWindowSystem, NullWindowSystem>();
+	builder.Services.AddSingleton<IHotkeyService, NullHotkeyService>();
+}
+
+builder.Services.AddSingleton<OpenWMApp>();
+builder.Services.AddSingleton<VirtualDesktopManager>();
+builder.Services.AddHostedService<OpenWMHostedService>();
+
+using var host = builder.Build();
+await host.RunAsync();

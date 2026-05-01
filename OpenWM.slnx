@@ -1,8 +1,0 @@
-<Solution>
-  <Folder Name="/src/">
-    <Project Path="src/OpenWM/OpenWM.csproj" />
-  </Folder>
-  <Folder Name="/tests/">
-    <Project Path="tests/OpenWM.Tests/OpenWM.Tests.csproj" />
-  </Folder>
-</Solution>
